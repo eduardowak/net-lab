@@ -1,0 +1,1413 @@
+TesteImposto/Imposto.Core/Data/NotaFiscalRepository.cs
+@@ -1,4 +1,6 @@
+-using System;
++using Imposto.Core.Domain;
++using Imposto.Core.DBase;
++using System;
+ using System.Collections.Generic;
+ using System.Linq;
+ using System.Text;
+ @@ -8,6 +10,46 @@ namespace Imposto.Core.Data
+ {
+     public class NotaFiscalRepository
+     {
+-
++        public string IncluirNotaFiscalDB(NotaFiscal notaFiscal)
++        {
++            var errorMessage = "";
++            try
++            {
++                int newID = 0;
++                newID = Database.DatSPReturnValue("P_NOTA_FISCAL",
++                    new object[,] {{"@pId", 0},
++                                    {"@pNumeroNotaFiscal", notaFiscal.NumeroNotaFiscal},
++                                    {"@pSerie", notaFiscal.Serie},
++                                    {"@pNomeCliente", notaFiscal.NomeCliente},
++                                    {"@pEstadoDestino", notaFiscal.EstadoDestino},
++                                    {"@pEstadoOrigem", notaFiscal.EstadoOrigem}
++                       }, "@pId");
++                
++                //insere os itens da nota (produtos)
++                foreach (var item in notaFiscal.ItensDaNotaFiscal)
++                {
++                    Database.DatSPReturnRS("P_NOTA_FISCAL_ITEM",
++                       new object[,] {{"@pId", 0},
++                                      {"@pIdNotaFiscal", newID},
++                                      {"@pCfop", item.Cfop},
++                                      {"@pTipoIcms", item.TipoIcms},
++                                      {"@pBaseIcms", item.BaseIcms},
++                                      {"@pAliquotaIcms", item.AliquotaIcms},
++                                      {"@pValorIcms", item.ValorIcms},
++                                      {"@pNomeProduto", item.NomeProduto},
++                                      {"@pCodigoProduto", item.CodigoProduto},
++                                      {"@pBaseIpi", item.BaseIpi},
++                                      {"@pAliquotaIpi", item.AliquotaIpi},
++                                      {"@pValorIpi", item.ValorIpi},
++                                      {"@pTaxaDesconto", item.TaxaDesconto}
++                       });
++                }
++            }
++            catch(Exception ex)
++            {
++                errorMessage = ex.Message;
++            }
++            return errorMessage;
++        }
+     }
+ }
+View  223  TesteImposto/Imposto.Core/Database/Database.cs
+@@ -0,0 +1,223 @@
++using System;
++using System.Collections.Generic;
++using System.Configuration;
++using System.Data;
++using System.Data.SqlClient;
++using System.Linq;
++using System.Text;
++using System.Threading.Tasks;
++
++namespace Imposto.Core.DBase
++{
++    class Database
++    {
++        public Database()
++        {
++
++        }
++
++        public static string DatConnectionString
++        {
++            get
++            {
++                return ConfigurationManager.ConnectionStrings["ImpostoDB"].ConnectionString;
++            }
++        }
++
++
++        //===[ DatSPReturnValue ]==========================================================
++
++        public static Int32 DatSPReturnValue(string strStoredProc, DataTable dt)
++        {
++            return DatSPReturnValue(strStoredProc, dt.Rows[0]);
++        }
++
++        public static Int32 DatSPReturnValue(string strStoredProc, DataRow dr)
++        {
++            return DatSPReturnValue(strStoredProc, f_DataRowToArray(dr));
++        }
++
++        public static Int32 DatSPReturnValue(string strStoredProc)
++        {
++            return DatSPReturnValue(strStoredProc, new object[0, 0]);
++        }
++
++        public static Int32 DatSPReturnValue(string strStoredProc, object[,] objParam, string retorno = "Return")
++        {
++            SqlConnection cn = new SqlConnection(DatConnectionString);
++            SqlCommand cmd = new SqlCommand(strStoredProc, cn);
++            SqlParameter objSqlPar;
++            Int32 intReturn = 0;
++
++            try
++            {
++                cn.Open();
++                cmd.CommandType = CommandType.StoredProcedure;
++                cmd.CommandTimeout = 300;
++                objSqlPar = cmd.Parameters.Add(retorno, SqlDbType.Int);
++                objSqlPar.Direction = ParameterDirection.ReturnValue;
++
++                f_CmdParametros(cmd, objParam);
++
++                var result = cmd.ExecuteScalar();
++
++                intReturn = (Int32)cmd.Parameters[retorno].Value;
++                cn.Close();
++            }
++
++            catch (Exception)
++            {
++                throw;
++            }
++            return intReturn;
++        }
++
++
++        //===[ DatSPReturnRS ]=============================================================
++
++        public static DataTable DatSPReturnRS(string strStoredProc)
++        {
++            return DatSPReturnRS(strStoredProc, new object[0, 0]);
++        }
++
++        public static DataTable DatSPReturnRS(string strStoredProc, DataTable dt)
++        {
++            return DatSPReturnRS(strStoredProc, dt.Rows[0]);
++        }
++
++        public static DataTable DatSPReturnRS(string strStoredProc, DataRow dr)
++        {
++            return DatSPReturnRS(strStoredProc, f_DataRowToArray(dr));
++        }
++
++        public static DataTable DatSPReturnRS(string strStoredProc, object[,] objParam)
++        {
++            return DatSPReturnRS(strStoredProc, objParam, "Return");
++        }
++
++        public static DataTable DatSPReturnRS(string strStoredProc,
++                                                          object[,] objParam,
++                                                          string strNomeTabela)
++        {
++            SqlConnection cn = new SqlConnection(DatConnectionString);
++            SqlCommand cmd = new SqlCommand(strStoredProc, cn);
++            SqlDataAdapter da = new SqlDataAdapter(cmd);
++            DataTable dtReturn;
++
++            try
++            {
++                cn.Open();
++                cmd.CommandType = CommandType.StoredProcedure;
++                cmd.CommandTimeout = 300;
++
++                f_CmdParametros(cmd, objParam);
++
++                da = new SqlDataAdapter(cmd);
++
++                dtReturn = new DataTable(strNomeTabela);
++
++                da.Fill(dtReturn);
++                da.Dispose();
++                cn.Close();
++            }
++            catch (Exception)
++            {
++                throw;
++            }
++
++            return dtReturn;
++        }
++
++        public static DataTable DatSqlReturnRS(string strSql)
++        {
++            return DatSqlReturnRS(strSql, "Return");
++        }
++
++        public static DataTable DatSqlReturnRS(string strSql, string strNomeTabela)
++        {
++            SqlConnection cn = new SqlConnection(DatConnectionString);
++            SqlCommand cmd = new SqlCommand(strSql, cn);
++            SqlDataAdapter da;
++            DataTable dtReturn;
++
++            try
++            {
++                cn.Open();
++                cmd.CommandType = CommandType.Text;
++                cmd.CommandTimeout = 300;
++
++                da = new SqlDataAdapter(cmd);
++
++                dtReturn = new DataTable(strNomeTabela);
++
++                da.Fill(dtReturn);
++                da.Dispose();
++                cn.Close();
++            }
++            catch (Exception)
++            {
++                throw;
++            }
++
++            return dtReturn;
++        }
++
++
++        //===[ Funções de apoio ]==========================================================
++
++        private static object[,] f_DataRowToArray(DataRow dr)
++        {
++            object[,] objReturn = new object[dr.Table.Columns.Count, 2];
++            int intCol = 0;
++
++            foreach (DataColumn objCol in dr.Table.Columns)
++            {
++                objReturn[intCol, 0] = String.Concat("@", objCol.ColumnName);
++
++                if (dr[objCol.ColumnName] is DBNull)
++                    if (objCol.DataType.Name == "Byte[]")   // Timestamp
++                        objReturn[intCol, 1] = null;
++                    else
++                    {
++                        objReturn[intCol, 1] = System.DBNull.Value;
++                    }
++                else
++                {
++                    objReturn[intCol, 1] = dr[objCol.ColumnName];
++                }
++
++                intCol++;
++            }
++
++            return objReturn;
++        }
++
++        private static void f_CmdParametros(SqlCommand cmd, object[,] objPar)
++        {
++            object obj;
++
++            for (int intI = 0; intI < objPar.GetLength(0); intI++)
++            {
++
++                obj = objPar[intI, 1];
++
++                if (obj == null)
++                    continue;
++
++                if (obj.GetType().Name == "DateTime")
++                {
++                    obj = ((DateTime)obj).ToString("yyyyMMdd HH:mm:ss.fff");
++                }
++
++                // Qdo o campo no Sql é Money e esta vindo o valor System.DbNull,
++                // dá um erro implicity conversion from data type nvarchar to money.            
++
++                if (objPar[intI, 0].ToString() == "@vl_tipomoney" && obj == System.DBNull.Value)
++                    cmd.Parameters.Add((string)objPar[intI, 0], SqlDbType.Money).Value = System.DBNull.Value;
++                else
++                    cmd.Parameters.AddWithValue((string)objPar[intI, 0], obj);
++            }
++        }
++    }
++
++}
+View  53  TesteImposto/Imposto.Core/Domain/Cfop.cs
+@@ -0,0 +1,53 @@
++using System;
++using System.Collections.Generic;
++using System.Linq;
++using System.Text;
++using System.Threading.Tasks;
++
++namespace Imposto.Core.Domain
++{
++    public class Cfop
++    {
++        private List<RotaCfop> RotasCfop = new List<RotaCfop> {            
++                new RotaCfop { EstadoOrigem = "SP", EstadoDestino = "RJ", Cfop = "6.000"},
++                new RotaCfop { EstadoOrigem = "SP", EstadoDestino = "PE", Cfop = "6.001"},
++                new RotaCfop { EstadoOrigem = "SP", EstadoDestino = "MG", Cfop = "6.002"},
++                new RotaCfop { EstadoOrigem = "SP", EstadoDestino = "PB", Cfop = "6.003"},
++                new RotaCfop { EstadoOrigem = "SP", EstadoDestino = "PR", Cfop = "6.004"},
++                new RotaCfop { EstadoOrigem = "SP", EstadoDestino = "PI", Cfop = "6.005"},
++                new RotaCfop { EstadoOrigem = "SP", EstadoDestino = "RO", Cfop = "6.006"},
++                new RotaCfop { EstadoOrigem = "SP", EstadoDestino = "SE", Cfop = "6.007"},
++                new RotaCfop { EstadoOrigem = "SP", EstadoDestino = "TO", Cfop = "6.008"},
++                new RotaCfop { EstadoOrigem = "SP", EstadoDestino = "SE", Cfop = "6.009"},
++                new RotaCfop { EstadoOrigem = "SP", EstadoDestino = "PA", Cfop = "6.010"},
++                new RotaCfop { EstadoOrigem = "MG", EstadoDestino = "RJ", Cfop = "6.000"},
++                new RotaCfop { EstadoOrigem = "MG", EstadoDestino = "PE", Cfop = "6.001"},
++                new RotaCfop { EstadoOrigem = "MG", EstadoDestino = "MG", Cfop = "6.002"},
++                new RotaCfop { EstadoOrigem = "MG", EstadoDestino = "PB", Cfop = "6.003"},
++                new RotaCfop { EstadoOrigem = "MG", EstadoDestino = "PR", Cfop = "6.004"},
++                new RotaCfop { EstadoOrigem = "MG", EstadoDestino = "PI", Cfop = "6.005"},
++                new RotaCfop { EstadoOrigem = "MG", EstadoDestino = "RO", Cfop = "6.006"},
++                new RotaCfop { EstadoOrigem = "MG", EstadoDestino = "SE", Cfop = "6.007"},
++                new RotaCfop { EstadoOrigem = "MG", EstadoDestino = "TO", Cfop = "6.008"},
++                new RotaCfop { EstadoOrigem = "MG", EstadoDestino = "SE", Cfop = "6.009"},
++                new RotaCfop { EstadoOrigem = "MG", EstadoDestino = "PA", Cfop = "6.010"}
++            };
++
++        public string ObterCfopPorRota(string EstadoOrigem, string EstadoDestino)
++        {
++            string cfop = "6.000";
++            var rotaCfop = RotasCfop.Find(s => s.EstadoOrigem == EstadoOrigem && s.EstadoDestino == EstadoDestino);
++            if (rotaCfop != null)
++                cfop = rotaCfop.Cfop;
++            return cfop;
++        }
++
++    }
++
++    class RotaCfop
++    {
++        public string EstadoOrigem {get; set;}
++        public string EstadoDestino {get; set;}
++        public string Cfop { get; set; }
++    }
++}
+View  47  TesteImposto/Imposto.Core/Domain/EstadosBrasil.cs
+@@ -0,0 +1,47 @@
++using System;
++using System.Collections.Generic;
++using System.Linq;
++using System.Text;
++using System.Threading.Tasks;
++
++namespace Imposto.Core.Domain
++{
++    public class EstadosBrasil
++    {
++        public EstadosBrasil() { }
++
++        public Dictionary<string, string> ObterEstados()
++        {
++            return new Dictionary<string, string>
++               {
++                    {"AC", "Acre"},
++                    {"AL", "Alagoas"},
++                    {"AP", "Amapá"},
++                    {"AM", "Amazonas"},
++                    {"BA", "Bahia"},
++                    {"CE", "Ceará"},
++                    {"DF", "Distrito Federal"},
++                    {"ES", "Espírito Santo"},
++                    {"GO", "Goiás"},
++                    {"MA", "Maranhão"},
++                    {"MT", "Mato Grosso"},
++                    {"MS", "Mato Grosso do Sul"},
++                    {"MG", "Minas Gerais"},
++                    {"PA", "Pará"},
++                    {"PB", "Paraíba"},
++                    {"PR", "Paraná"},
++                    {"PE", "Pernambuco"},
++                    {"PI", "Piauí"},
++                    {"RJ", "Rio de Janeiro"},
++                    {"RN", "Rio Grande do Norte"},
++                    {"RS", "Rio Grande do Sul"},
++                    {"RO", "Rondônia"},
++                    {"RR", "Roraima"},
++                    {"SC", "Santa Catarina"},
++                    {"SP", "São Paulo"},
++                    {"SE", "Sergipe"},
++                    {"TO", "Tocantins"},
++               };
++        }
++    }
++}
+View  39  TesteImposto/Imposto.Core/Domain/Icms.cs
+@@ -0,0 +1,39 @@
++using System;
++using System.Collections.Generic;
++using System.Linq;
++using System.Text;
++using System.Threading.Tasks;
++
++namespace Imposto.Core.Domain
++{
++    public class Icms
++    {
++        public double BaseIcms { get; set; }
++        public double AliquotaIcms { get; set; }
++        public double ValorIcms { get; set; }
++        public string TipoIcms { get; set; }
++
++        public void CalcularIcms(double valorProduto, string estadoOrigem, string estadoDestino, string cFop)
++        {
++            if (estadoOrigem == estadoDestino)
++            {
++                this.TipoIcms = "60";
++                this.AliquotaIcms = 0.18;
++            }
++            else
++            {
++                this.TipoIcms = "10";
++                this.AliquotaIcms = 0.17;
++            }
++            if (cFop == "6.009")
++            {
++                this.BaseIcms = valorProduto * 0.90; //redução de base
++            }
++            else
++            {
++                this.BaseIcms = valorProduto;
++            }
++            this.ValorIcms = this.BaseIcms * this.AliquotaIcms;
++        }
++    }
++}
+View  22  TesteImposto/Imposto.Core/Domain/Ipi.cs
+@@ -0,0 +1,22 @@
++using System;
++using System.Collections.Generic;
++using System.Linq;
++using System.Text;
++using System.Threading.Tasks;
++
++namespace Imposto.Core.Domain
++{
++    public class Ipi
++    {
++        public double BaseIpi { get; set; }
++        public double AliquotaIpi { get; set; }
++        public double ValorIpi { get; set;  }
++
++        public void CalcularIpi(double valorProduto)
++        {
++            this.BaseIpi = valorProduto;
++            this.AliquotaIpi = 0.10;
++            this.ValorIpi = this.BaseIpi * this.AliquotaIpi;
++        }
++    }
++}
+View  192  TesteImposto/Imposto.Core/Domain/NotaFiscal.cs
+ @@ -17,7 +17,7 @@ public class NotaFiscal
+         public string EstadoDestino { get; set; }
+         public string EstadoOrigem { get; set; }
+ 
+-        public IEnumerable<NotaFiscalItem> ItensDaNotaFiscal { get; set; }
++        public List<NotaFiscalItem> ItensDaNotaFiscal { get; set; }
+ 
+         public NotaFiscal()
+         {
+ @@ -26,133 +26,81 @@ public NotaFiscal()
+ 
+         public void EmitirNotaFiscal(Pedido pedido)
+         {
+-            this.NumeroNotaFiscal = 99999;
++            //Dados básicos da NF
++            this.NumeroNotaFiscal = new Random().Next(Int32.MaxValue);
+             this.Serie = new Random().Next(Int32.MaxValue);
+             this.NomeCliente = pedido.NomeCliente;
++            this.EstadoDestino = pedido.EstadoDestino;
++            this.EstadoOrigem = pedido.EstadoOrigem;
+ 
+-            this.EstadoDestino = pedido.EstadoOrigem;
+-            this.EstadoOrigem = pedido.EstadoDestino;
+-
++            //Produtos da NF
+             foreach (PedidoItem itemPedido in pedido.ItensDoPedido)
+             {
+-                NotaFiscalItem notaFiscalItem = new NotaFiscalItem();
+-                if ((this.EstadoOrigem == "SP") && (this.EstadoDestino == "RJ"))
+-                {
+-                    notaFiscalItem.Cfop = "6.000";                    
+-                }
+-                else if ((this.EstadoOrigem == "SP") && (this.EstadoDestino == "PE"))
+-                {
+-                    notaFiscalItem.Cfop = "6.001";
+-                }
+-                else if ((this.EstadoOrigem == "SP") && (this.EstadoDestino == "MG"))
+-                {
+-                    notaFiscalItem.Cfop = "6.002";
+-                }
+-                else if ((this.EstadoOrigem == "SP") && (this.EstadoDestino == "PB"))
+-                {
+-                    notaFiscalItem.Cfop = "6.003";
+-                }
+-                else if ((this.EstadoOrigem == "SP") && (this.EstadoDestino == "PR"))
+-                {
+-                    notaFiscalItem.Cfop = "6.004";
+-                }
+-                else if ((this.EstadoOrigem == "SP") && (this.EstadoDestino == "PI"))
+-                {
+-                    notaFiscalItem.Cfop = "6.005";
+-                }
+-                else if ((this.EstadoOrigem == "SP") && (this.EstadoDestino == "RO"))
+-                {
+-                    notaFiscalItem.Cfop = "6.006";
+-                }
+-                else if ((this.EstadoOrigem == "SP") && (this.EstadoDestino == "SE"))
+-                {
+-                    notaFiscalItem.Cfop = "6.007";
+-                }
+-                else if ((this.EstadoOrigem == "SP") && (this.EstadoDestino == "TO"))
+-                {
+-                    notaFiscalItem.Cfop = "6.008";
+-                }
+-                else if ((this.EstadoOrigem == "SP") && (this.EstadoDestino == "SE"))
+-                {
+-                    notaFiscalItem.Cfop = "6.009";
+-                }
+-                else if ((this.EstadoOrigem == "SP") && (this.EstadoDestino == "PA"))
+-                {
+-                    notaFiscalItem.Cfop = "6.010";
+-                }
+-                else if ((this.EstadoOrigem == "MG") && (this.EstadoDestino == "RJ"))
+-                {
+-                    notaFiscalItem.Cfop = "6.000";
+-                }
+-                else if ((this.EstadoOrigem == "MG") && (this.EstadoDestino == "PE"))
+-                {
+-                    notaFiscalItem.Cfop = "6.001";
+-                }
+-                else if ((this.EstadoOrigem == "MG") && (this.EstadoDestino == "MG"))
+-                {
+-                    notaFiscalItem.Cfop = "6.002";
+-                }
+-                else if ((this.EstadoOrigem == "MG") && (this.EstadoDestino == "PB"))
+-                {
+-                    notaFiscalItem.Cfop = "6.003";
+-                }
+-                else if ((this.EstadoOrigem == "MG") && (this.EstadoDestino == "PR"))
+-                {
+-                    notaFiscalItem.Cfop = "6.004";
+-                }
+-                else if ((this.EstadoOrigem == "MG") && (this.EstadoDestino == "PI"))
+-                {
+-                    notaFiscalItem.Cfop = "6.005";
+-                }
+-                else if ((this.EstadoOrigem == "MG") && (this.EstadoDestino == "RO"))
+-                {
+-                    notaFiscalItem.Cfop = "6.006";
+-                }
+-                else if ((this.EstadoOrigem == "MG") && (this.EstadoDestino == "SE"))
+-                {
+-                    notaFiscalItem.Cfop = "6.007";
+-                }
+-                else if ((this.EstadoOrigem == "MG") && (this.EstadoDestino == "TO"))
+-                {
+-                    notaFiscalItem.Cfop = "6.008";
+-                }
+-                else if ((this.EstadoOrigem == "MG") && (this.EstadoDestino == "SE"))
+-                {
+-                    notaFiscalItem.Cfop = "6.009";
+-                }
+-                else if ((this.EstadoOrigem == "MG") && (this.EstadoDestino == "PA"))
+-                {
+-                    notaFiscalItem.Cfop = "6.010";
+-                }
+-                if (this.EstadoDestino == this.EstadoOrigem)
+-                {
+-                    notaFiscalItem.TipoIcms = "60";
+-                    notaFiscalItem.AliquotaIcms = 0.18;
+-                }
+-                else
+-                {
+-                    notaFiscalItem.TipoIcms = "10";
+-                    notaFiscalItem.AliquotaIcms = 0.17;
+-                }
+-                if (notaFiscalItem.Cfop == "6.009")
+-                {
+-                    notaFiscalItem.BaseIcms = itemPedido.ValorItemPedido*0.90; //redução de base
+-                }
+-                else
+-                {
+-                    notaFiscalItem.BaseIcms = itemPedido.ValorItemPedido;
+-                }
+-                notaFiscalItem.ValorIcms = notaFiscalItem.BaseIcms*notaFiscalItem.AliquotaIcms;
++                NotaFiscalItem notaFiscalItem = GerarItemNotaFiscal(itemPedido);
++                this.ItensDaNotaFiscal.Add(notaFiscalItem);
++            }    
++        }
++
++
++        public NotaFiscalItem GerarItemNotaFiscal(PedidoItem itemPedido)
++        {
++            NotaFiscalItem notaFiscalItem = new NotaFiscalItem();
++
++            notaFiscalItem.NomeProduto = itemPedido.NomeProduto;
++            notaFiscalItem.CodigoProduto = itemPedido.CodigoProduto;
++            //Desconto
++            notaFiscalItem.TaxaDesconto = ObterTaxaDesconto();
++            double vlDesconto = itemPedido.ValorItemPedido * (notaFiscalItem.TaxaDesconto / 100.0D);
++
++            itemPedido.ValorItemPedido = itemPedido.ValorItemPedido - vlDesconto;
++
++            //Cfop
++            notaFiscalItem.Cfop = new Cfop().ObterCfopPorRota(this.EstadoOrigem, this.EstadoDestino);
++            //Icms
++            CalcularIcms(notaFiscalItem, itemPedido.ValorItemPedido);
++            //Ipi
++            CalcularIpi(notaFiscalItem, itemPedido.ValorItemPedido);
++            //Brinde
++            if (itemPedido.Brinde)
++            {
++                notaFiscalItem.TipoIcms = "60";
++                notaFiscalItem.AliquotaIcms = 0.18;
++                notaFiscalItem.ValorIcms = notaFiscalItem.BaseIcms * notaFiscalItem.AliquotaIcms;
++                notaFiscalItem.AliquotaIpi = 0;
++                notaFiscalItem.ValorIpi = 0;
++            }
+ 
+-                if (itemPedido.Brinde)
+-                {
+-                    notaFiscalItem.TipoIcms = "60";
+-                    notaFiscalItem.AliquotaIcms = 0.18;
+-                    notaFiscalItem.ValorIcms = notaFiscalItem.BaseIcms * notaFiscalItem.AliquotaIcms;
+-                }
+-                notaFiscalItem.NomeProduto = itemPedido.NomeProduto;
+-                notaFiscalItem.CodigoProduto = itemPedido.CodigoProduto;
+-            }            
++            return notaFiscalItem;
++        }
++        
++        public double ObterTaxaDesconto()
++        {
++            double taxaDesconto = 0;
++            //Taxa de desconto de 10% para região Sudeste
++            if (this.EstadoDestino == "SP" || this.EstadoDestino == "RJ" || this.EstadoDestino == "MG" || this.EstadoDestino == "ES")
++            {
++                taxaDesconto = 10;
++            }
++            return taxaDesconto;
++        }
++
++        public void CalcularIcms(NotaFiscalItem nfItem, double valorItemPedido)
++        {
++            Icms icms = new Icms();
++            icms.CalcularIcms(valorItemPedido, this.EstadoOrigem, this.EstadoDestino, nfItem.Cfop);
++            nfItem.BaseIcms = icms.BaseIcms;
++            nfItem.AliquotaIcms = icms.AliquotaIcms;
++            nfItem.ValorIcms = icms.ValorIcms;
++            nfItem.TipoIcms = icms.TipoIcms;
++        }
++
++        public void CalcularIpi(NotaFiscalItem nfItem, double valorItemPedido)
++        {
++            Ipi ipi = new Ipi();
++            ipi.CalcularIpi(valorItemPedido);
++            nfItem.BaseIpi = ipi.BaseIpi;
++            nfItem.AliquotaIpi = ipi.AliquotaIpi;
++            nfItem.ValorIpi = ipi.ValorIpi;
+         }
+     }
+ }
+View  4  TesteImposto/Imposto.Core/Domain/NotaFiscalItem.cs
+ @@ -17,5 +17,9 @@ public class NotaFiscalItem
+         public double ValorIcms { get; set; }
+         public string NomeProduto { get; set; }
+         public string CodigoProduto { get; set; }
++        public double BaseIpi { get; set; }
++        public double AliquotaIpi { get; set; }
++        public double ValorIpi { get; set; }
++        public double TaxaDesconto { get; set; }
+     }
+ }
+View  17  TesteImposto/Imposto.Core/Helper/InfraStructure.cs
+@@ -0,0 +1,17 @@
++using System;
++using System.Collections.Generic;
++using System.Linq;
++using System.Text;
++using System.Threading.Tasks;
++using System.Configuration;
++
++namespace Imposto.Core.Helper
++{
++    class InfraStructure
++    {
++        public string GetXmlFilesDir()
++        {
++            return ConfigurationManager.AppSettings["XmlFilesDir"].ToString();
++        }
++    }
++}
+View  29  TesteImposto/Imposto.Core/Helper/Xml.cs
+@@ -0,0 +1,29 @@
++using System;
++using System.Collections.Generic;
++using System.IO;
++using System.Linq;
++using System.Text;
++using System.Threading.Tasks;
++using System.Xml.Serialization;
++
++namespace Imposto.Core.Helper
++{
++    class Xml
++    {
++        public string Serializar(object obj, string arquivoXML)
++        {
++            var errorMessage = "";
++            try
++            {
++                var stream = new FileStream(arquivoXML, FileMode.Create);
++                var serializador = new XmlSerializer(obj.GetType());
++                serializador.Serialize(stream, obj);
++            }
++            catch(Exception ex)
++            {
++                errorMessage = ex.Message;
++            }
++            return errorMessage;
++        }
++    }
++}
+View  9  TesteImposto/Imposto.Core/Imposto.Core.csproj
+ @@ -31,6 +31,7 @@
+   </PropertyGroup>
+   <ItemGroup>
+     <Reference Include="System" />
++    <Reference Include="System.Configuration" />
+     <Reference Include="System.Core" />
+     <Reference Include="System.Xml.Linq" />
+     <Reference Include="System.Data.DataSetExtensions" />
+ @@ -39,15 +40,21 @@
+     <Reference Include="System.Xml" />
+   </ItemGroup>
+   <ItemGroup>
++    <Compile Include="Database\Database.cs" />
+     <Compile Include="Data\NotaFiscalRepository.cs" />
++    <Compile Include="Domain\Cfop.cs" />
++    <Compile Include="Domain\EstadosBrasil.cs" />
++    <Compile Include="Domain\Icms.cs" />
++    <Compile Include="Domain\Ipi.cs" />
+     <Compile Include="Domain\NotaFiscal.cs" />
+     <Compile Include="Domain\NotaFiscalItem.cs" />
+     <Compile Include="Domain\Pedido.cs" />
+     <Compile Include="Domain\PedidoItem.cs" />
++    <Compile Include="Helper\InfraStructure.cs" />
++    <Compile Include="Helper\Xml.cs" />
+     <Compile Include="Properties\AssemblyInfo.cs" />
+     <Compile Include="Service\NotaFiscalService.cs" />
+   </ItemGroup>
+-  <ItemGroup />
+   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+   <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 
+        Other similar extension points exist, see Microsoft.Common.targets.
+View  28  TesteImposto/Imposto.Core/Service/NotaFiscalService.cs
+@@ -1,4 +1,6 @@
+-using Imposto.Core.Domain;
++using Imposto.Core.Data;
++using Imposto.Core.Domain;
++using Imposto.Core.Helper;
+ using System;
+ using System.Collections.Generic;
+ using System.Linq;
+ @@ -9,10 +11,32 @@ namespace Imposto.Core.Service
+ {
+     public class NotaFiscalService
+     {
+-        public void GerarNotaFiscal(Domain.Pedido pedido)
++        public string GerarNotaFiscal(Domain.Pedido pedido)
+         {
++            string errorMessage = "";
++            //gera entidade de NF
+             NotaFiscal notaFiscal = new NotaFiscal();
+             notaFiscal.EmitirNotaFiscal(pedido);
++            //serializa o objeto pra XML
++            var xml = new Xml();
++            var infra = new InfraStructure();
++            var nomeArquivoXML = infra.GetXmlFilesDir() + "NF_" + notaFiscal.NumeroNotaFiscal + ".xml";
++            string sGravaXML = xml.Serializar(notaFiscal, nomeArquivoXML);
++            if (sGravaXML != "")
++            {
++                errorMessage += "\nNão foi possível gravar a Nota Fiscal em XML. Detalhes: " + sGravaXML;
++                return errorMessage;
++            }
++            //grava a NF no banco
++            NotaFiscalRepository nfRepository = new NotaFiscalRepository();
++            string sGravaDB = nfRepository.IncluirNotaFiscalDB(notaFiscal);
++            if (sGravaDB != "")
++            {
++                errorMessage += "\nNão foi possível gravar a Nota Fiscal no Banco de Dados. Detalhes: " + sGravaDB;
++                return errorMessage;
++            }
++
++            return errorMessage;
+         }
+     }
+ }
+View  97  TesteImposto/SQL/CRIAR_BANCO_DADOS.sql
+ @@ -11,47 +11,72 @@ GO
+ SET ANSI_PADDING ON
+ GO
+ 
+-CREATE TABLE [dbo].[NotaFiscal](
+-	[Id] [int] IDENTITY(1,1) NOT NULL,
+-	[NumeroNotaFiscal] [int] NULL,
+-	[Serie] [int] NULL,
+-	[NomeCliente] [varchar](50) NULL,
+-	[EstadoDestino] [varchar](50) NULL,
+-	[EstadoOrigem] [varchar](50) NULL,
+- CONSTRAINT [PK_NotaFiscal] PRIMARY KEY CLUSTERED 
+-(
+-	[Id] ASC
+-)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
+-) ON [PRIMARY]
+-
++IF NOT EXISTS(SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'dbo.NotaFiscal') AND type in (N'U'))
++BEGIN
++	CREATE TABLE [dbo].[NotaFiscal](
++		[Id] [int] IDENTITY(1,1) NOT NULL,
++		[NumeroNotaFiscal] [int] NULL,
++		[Serie] [int] NULL,
++		[NomeCliente] [varchar](50) NULL,
++		[EstadoDestino] [varchar](50) NULL,
++		[EstadoOrigem] [varchar](50) NULL,
++	 CONSTRAINT [PK_NotaFiscal] PRIMARY KEY CLUSTERED 
++	(
++		[Id] ASC
++	)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
++	) ON [PRIMARY]
++END
+ GO
+ 
+-CREATE TABLE [dbo].[NotaFiscalItem](
+-	[Id] [int]  IDENTITY(1,1) NOT NULL,
+-	[IdNotaFiscal] [int] NULL,
+-	[Cfop] [varchar](5) NULL,
+-	[TipoIcms] [varchar](20) NULL,
+-	[BaseIcms] [decimal](18, 5) NULL,
+-	[AliquotaIcms] [decimal](18, 5) NULL,
+-	[ValorIcms] [decimal](18, 5) NULL,
+-	[NomeProduto] [varchar](50) NULL,
+-	[CodigoProduto] [varchar](20) NULL,
+- CONSTRAINT [PK_NotaFiscalItem] PRIMARY KEY CLUSTERED 
+-(
+-	[Id] ASC
+-)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
+-) ON [PRIMARY]
++IF NOT EXISTS(SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'dbo.NotaFiscalItem') AND type in (N'U'))
++BEGIN
++	CREATE TABLE [dbo].[NotaFiscalItem](
++		[Id] [int]  IDENTITY(1,1) NOT NULL,
++		[IdNotaFiscal] [int] NULL,
++		[Cfop] [varchar](5) NULL,
++		[TipoIcms] [varchar](20) NULL,
++		[BaseIcms] [decimal](18, 5) NULL,
++		[AliquotaIcms] [decimal](18, 5) NULL,
++		[ValorIcms] [decimal](18, 5) NULL,
++		[NomeProduto] [varchar](50) NULL,
++		[CodigoProduto] [varchar](20) NULL
++	 CONSTRAINT [PK_NotaFiscalItem] PRIMARY KEY CLUSTERED 
++	(
++		[Id] ASC
++	)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
++	) ON [PRIMARY]
+ 
+-GO
++	ALTER TABLE [dbo].[NotaFiscalItem]  WITH CHECK ADD  CONSTRAINT [FK_NotaFiscal] FOREIGN KEY([Id])
++	REFERENCES [dbo].[NotaFiscalItem] ([Id])
+ 
+-SET ANSI_PADDING OFF
+-GO
++	ALTER TABLE [dbo].[NotaFiscalItem] CHECK CONSTRAINT [FK_NotaFiscal]
+ 
+-ALTER TABLE [dbo].[NotaFiscalItem]  WITH CHECK ADD  CONSTRAINT [FK_NotaFiscal] FOREIGN KEY([Id])
+-REFERENCES [dbo].[NotaFiscalItem] ([Id])
++	SET ANSI_PADDING OFF
++END
+ GO
+ 
+-ALTER TABLE [dbo].[NotaFiscalItem] CHECK CONSTRAINT [FK_NotaFiscal]
++--Colunas adicionais de NotaFiscalItem
++IF NOT EXISTS(SELECT 1 FROM syscolumns WHERE id = OBJECT_ID(N'dbo.NotaFiscalItem') AND name = 'BaseIpi')
++BEGIN
++	ALTER TABLE dbo.NotaFiscalItem 
++		ADD BaseIpi [decimal](18, 5) NULL
++END
+ GO
+-
+-
++IF NOT EXISTS(SELECT 1 FROM syscolumns WHERE id = OBJECT_ID(N'dbo.NotaFiscalItem') AND name = 'AliquotaIpi')
++BEGIN
++	ALTER TABLE dbo.NotaFiscalItem 
++		ADD AliquotaIpi [decimal](18, 5) NULL
++END
++GO
++IF NOT EXISTS(SELECT 1 FROM syscolumns WHERE id = OBJECT_ID(N'dbo.NotaFiscalItem') AND name = 'ValorIpi')
++BEGIN
++	ALTER TABLE dbo.NotaFiscalItem 
++		ADD ValorIpi [decimal](18, 5) NULL
++END
++GO
++IF NOT EXISTS(SELECT 1 FROM syscolumns WHERE id = OBJECT_ID(N'dbo.NotaFiscalItem') AND name = 'TaxaDesconto')
++BEGIN
++	ALTER TABLE dbo.NotaFiscalItem 
++		ADD TaxaDesconto [decimal](18, 5) NULL
++END
++GO 
+View  27  TesteImposto/SQL/P_CFOP.sql
+@@ -0,0 +1,27 @@
++
++USE [Teste]
++GO
++IF OBJECT_ID('dbo.P_CFOP') IS NOT NULL
++BEGIN
++    DROP PROCEDURE dbo.P_CFOP
++    IF OBJECT_ID('dbo.P_CFOP') IS NOT NULL
++        PRINT '<<< FALHA APAGANDO A PROCEDURE dbo.P_CFOP >>>'
++END
++GO
++SET QUOTED_IDENTIFIER ON
++GO
++SET NOCOUNT ON 
++GO 
++CREATE PROCEDURE dbo.P_CFOP 
++AS
++BEGIN
++	SELECT
++	Cfop,
++	Total_BaseICMS = ISNULL(SUM(BaseIcms), 0),
++	Total_ICMS = ISNULL(SUM(ValorIcms), 0),
++	Total_BaseIPI = ISNULL(SUM(BaseIpi), 0),
++	Total_IPI = ISNULL(SUM(ValorIPI), 0)
++	FROM NotaFiscalItem
++	GROUP BY Cfop
++END
++GO 
+View  1  TesteImposto/SQL/P_NOTA_FISCAL.sql
+ @@ -40,6 +40,7 @@ BEGIN
+            ,@pEstadoOrigem)
+ 
+ 		SET @pId = @@IDENTITY
++		RETURN @pID
+ 	END
+ 	ELSE
+ 	BEGIN
+View  22  TesteImposto/SQL/P_NOTA_FISCAL_ITEM.sql
+ @@ -23,7 +23,11 @@ CREATE PROCEDURE P_NOTA_FISCAL_ITEM
+     @pAliquotaIcms decimal(18,5),
+     @pValorIcms decimal(18,5),
+     @pNomeProduto varchar(50),
+-    @pCodigoProduto varchar(20)
++    @pCodigoProduto varchar(20),
++    @pBaseIpi decimal(18,5),
++    @pAliquotaIpi decimal(18,5),
++    @pValorIpi decimal(18,5),
++	@pTaxaDesconto decimal(18,5)
+ )
+ AS
+ BEGIN
+ @@ -37,7 +41,11 @@ BEGIN
+            ,[AliquotaIcms]
+            ,[ValorIcms]
+            ,[NomeProduto]
+-           ,[CodigoProduto])
++           ,[CodigoProduto]
++           ,[BaseIpi]
++           ,[AliquotaIpi]
++           ,[ValorIpi]
++		   ,[TaxaDesconto])
+ 		VALUES
+            (@pIdNotaFiscal,
+ 			@pCfop,
+ @@ -46,7 +54,11 @@ BEGIN
+ 			@pAliquotaIcms,
+ 			@pValorIcms,
+ 			@pNomeProduto,
+-			@pCodigoProduto)
++			@pCodigoProduto,
++			@pBaseIpi,
++			@pAliquotaIpi,
++			@pValorIpi,
++			@pTaxaDesconto)
+ 
+ 		SET @pId = @@IDENTITY
+ 	END
+ @@ -61,6 +73,10 @@ BEGIN
+ 			,[ValorIcms] = @pValorIcms
+ 			,[NomeProduto] = @pNomeProduto
+ 			,[CodigoProduto] = @pCodigoProduto
++			,[BaseIpi] = @pBaseIpi
++			,[AliquotaIpi] = @pAliquotaIpi
++			,[ValorIpi] = @pValorIpi
++			,[TaxaDesconto] = @pTaxaDesconto
+ 		 WHERE Id = @pId
+ 	END	    
+ END
+View  6  TesteImposto/TesteImposto.sln
+ @@ -7,6 +7,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TesteImposto", "TesteImpost
+ EndProject
+ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Imposto.Core", "Imposto.Core\Imposto.Core.csproj", "{2339C0B3-1E95-4CD3-BFBA-64B377857016}"
+ EndProject
++Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TesteUnitario", "TesteUnitario\TesteUnitario.csproj", "{4C8DF2CA-A4CA-44C3-BE1F-6D5B8A33226D}"
++EndProject
+ Global
+ 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+ 		Debug|Any CPU = Debug|Any CPU
+ @@ -21,6 +23,10 @@ Global
+ 		{2339C0B3-1E95-4CD3-BFBA-64B377857016}.Debug|Any CPU.Build.0 = Debug|Any CPU
+ 		{2339C0B3-1E95-4CD3-BFBA-64B377857016}.Release|Any CPU.ActiveCfg = Release|Any CPU
+ 		{2339C0B3-1E95-4CD3-BFBA-64B377857016}.Release|Any CPU.Build.0 = Release|Any CPU
++		{4C8DF2CA-A4CA-44C3-BE1F-6D5B8A33226D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
++		{4C8DF2CA-A4CA-44C3-BE1F-6D5B8A33226D}.Debug|Any CPU.Build.0 = Debug|Any CPU
++		{4C8DF2CA-A4CA-44C3-BE1F-6D5B8A33226D}.Release|Any CPU.ActiveCfg = Release|Any CPU
++		{4C8DF2CA-A4CA-44C3-BE1F-6D5B8A33226D}.Release|Any CPU.Build.0 = Release|Any CPU
+ 	EndGlobalSection
+ 	GlobalSection(SolutionProperties) = preSolution
+ 		HideSolutionNode = FALSE
+View  10  TesteImposto/TesteImposto/App.config
+ @@ -3,4 +3,12 @@
+     <startup> 
+         <supportedRuntime version="v4.0" sku=".NETFramework,Version=v4.5" />
+     </startup>
+-</configuration> 
++    <appSettings>
++      <add key="XmlFilesDir" value="C:\Temp\" />
++    </appSettings>
++    <connectionStrings>
++      <add name="ImpostoDB" 
++           providerName="System.Data.SqlClient"
++           connectionString= "Data Source=(localdb)\ProjectsV12;Initial Catalog=Teste;Integrated Security=True;Encrypt=False;TrustServerCertificate=False" />
++    </connectionStrings>
++</configuration>  
+View  95  TesteImposto/TesteImposto/FormImposto.Designer.cs
+Diff suppressed. Click to show.
+View  108  TesteImposto/TesteImposto/FormImposto.cs
+ @@ -12,63 +12,125 @@
+ 
+ namespace TesteImposto
+ {
+-    public partial class FormImposto : Form
++    public partial class  FormImposto : Form
+     {
+         private Pedido pedido = new Pedido();
+ 
+         public FormImposto()
+         {
+             InitializeComponent();
+-            dataGridViewPedidos.AutoGenerateColumns = true;                       
+-            dataGridViewPedidos.DataSource = GetTablePedidos();
+-            ResizeColumns();
++            iniciar();
+         }
+ 
+-        private void ResizeColumns()
++        private void iniciar()
+         {
+-            double mediaWidth = dataGridViewPedidos.Width / dataGridViewPedidos.Columns.GetColumnCount(DataGridViewElementStates.Visible);
++            //combos
++            var estados = new EstadosBrasil().ObterEstados();
++            cboEstadoOrigem.DataSource = new BindingSource(estados, null);
++            cboEstadoDestino.DataSource = new BindingSource(estados, null);
++            
++            limpar();           
++        }
+ 
+-            for (int i = dataGridViewPedidos.Columns.Count - 1; i >= 0; i--)
+-            {
+-                var coluna = dataGridViewPedidos.Columns[i];
+-                coluna.Width = Convert.ToInt32(mediaWidth);
+-            }   
++        private void limpar()
++        {
++            textBoxNomeCliente.Text = "";
++            cboEstadoOrigem.SelectedIndex = 0;
++            cboEstadoDestino.SelectedIndex = 0;
++            dataGridViewPedidos.DataSource = null;
++            dataGridViewPedidos.AutoGenerateColumns = true;
++            dataGridViewPedidos.DataSource = GetTablePedidos();
++            textBoxNomeCliente.Focus();
++            this.pedido = new Pedido();
+         }
+ 
+         private object GetTablePedidos()
+         {
+             DataTable table = new DataTable("pedidos");
+-            table.Columns.Add(new DataColumn("Nome do produto", typeof(string)));
+-            table.Columns.Add(new DataColumn("Codigo do produto", typeof(string)));
+-            table.Columns.Add(new DataColumn("Valor", typeof(decimal)));
++            table.Columns.Add(new DataColumn("Nome do Produto", typeof(string)));
++            table.Columns.Add(new DataColumn("Código do Produto", typeof(string)));
++            table.Columns.Add(new DataColumn("Valor do Produto", typeof(decimal)));
+             table.Columns.Add(new DataColumn("Brinde", typeof(bool)));
+-                     
++            
+             return table;
+         }
+ 
+         private void buttonGerarNotaFiscal_Click(object sender, EventArgs e)
+-        {            
++        {
++            if (!validarForm()) return;
++            
+             NotaFiscalService service = new NotaFiscalService();
+-            pedido.EstadoOrigem = txtEstadoOrigem.Text;
+-            pedido.EstadoDestino = txtEstadoDestino.Text;
++            pedido.EstadoOrigem = cboEstadoOrigem.SelectedValue.ToString();
++            pedido.EstadoDestino = cboEstadoDestino.SelectedValue.ToString();
+             pedido.NomeCliente = textBoxNomeCliente.Text;
+ 
+             DataTable table = (DataTable)dataGridViewPedidos.DataSource;
+ 
++            pedido.ItensDoPedido.Clear();
+             foreach (DataRow row in table.Rows)
+             {
+                 pedido.ItensDoPedido.Add(
+                     new PedidoItem()
+                     {
+-                        Brinde = Convert.ToBoolean(row["Brinde"]),
+-                        CodigoProduto =  row["Codigo do produto"].ToString(),
++                        Brinde = Convert.ToBoolean(row["Brinde"].GetType().Name.Equals("DBNull") ? false : row["Brinde"]),
++                        CodigoProduto =  row["Código do produto"].ToString(),
+                         NomeProduto = row["Nome do produto"].ToString(),
+-                        ValorItemPedido = Convert.ToDouble(row["Valor"].ToString())            
++                        ValorItemPedido = Convert.ToDouble(row["Valor do Produto"].ToString())            
+                     });
+             }
++            string sGeraNota = "";
++            sGeraNota = service.GerarNotaFiscal(pedido);
++            if (sGeraNota != "")
++                MessageBox.Show("Erro ao gerar a Nota Fiscal. Detalhes:\n\n" + sGeraNota);
++            else
++            {
++                MessageBox.Show("A Nota Fiscal foi gerada com sucesso.");
++                limpar();
++            }
++        }
+ 
+-            service.GerarNotaFiscal(pedido);
+-            MessageBox.Show("Operação efetuada com sucesso");
++        private void dataGridViewPedidos_DataError(object sender, DataGridViewDataErrorEventArgs e)
++        {
++            if (e.ColumnIndex == 2)
++            {
++                MessageBox.Show("Favor informar um valor numérico");
++            }
+         }
++
++        private bool validarForm()
++        {
++            if (textBoxNomeCliente.Text.Trim() == "")
++            {
++                MessageBox.Show("Favor informar o Nome do Cliente");
++                textBoxNomeCliente.Focus();
++                return false;
++            }
++            //valida a grid
++            if (dataGridViewPedidos.Rows.Count == 1)
++            {
++                MessageBox.Show("Favor informar ao menos um Item/Produto.");
++                return false;
++            }
++            for (int i = 0; i < dataGridViewPedidos.Rows.Count - 1; i++ )
++            {
++                var row = dataGridViewPedidos.Rows[i];
++                for (int j = 0; j <= 2; j++)
++                {
++                    var cel = row.Cells[j];
++                    if (cel.Value == null || cel.Value.ToString().Trim() == "")
++                    {
++                        MessageBox.Show("Favor informar o " + cel.OwningColumn.Name);
++                        dataGridViewPedidos.ClearSelection();
++                        cel.Selected = true;
++                        dataGridViewPedidos.CurrentCell = cel;
++                        dataGridViewPedidos.BeginEdit(true);
++                        return false;
++                    }
++                }
++            }
++                
++            return true;
++        }
++
+     }
+ }
+View  14  TesteImposto/TesteUnitario/App.config
+@@ -0,0 +1,14 @@
++﻿<?xml version="1.0" encoding="utf-8" ?>
++<configuration>
++    <startup> 
++        <supportedRuntime version="v4.0" sku=".NETFramework,Version=v4.5" />
++    </startup>
++    <appSettings>
++      <add key="XmlFilesDir" value="C:\Temp\" />
++    </appSettings>  
++    <connectionStrings>
++      <add name="ImpostoDB" 
++           providerName="System.Data.SqlClient"
++           connectionString= "Data Source=(localdb)\ProjectsV12;Initial Catalog=Teste;Integrated Security=True;Encrypt=False;TrustServerCertificate=False" />
++    </connectionStrings>
++</configuration>  
+View  36  TesteImposto/TesteUnitario/Properties/AssemblyInfo.cs
+@@ -0,0 +1,36 @@
++using System.Reflection;
++using System.Runtime.CompilerServices;
++using System.Runtime.InteropServices;
++
++// General Information about an assembly is controlled through the following 
++// set of attributes. Change these attribute values to modify the information
++// associated with an assembly.
++[assembly: AssemblyTitle("TesteUnitario")]
++[assembly: AssemblyDescription("")]
++[assembly: AssemblyConfiguration("")]
++[assembly: AssemblyCompany("")]
++[assembly: AssemblyProduct("TesteUnitario")]
++[assembly: AssemblyCopyright("Copyright ©  2015")]
++[assembly: AssemblyTrademark("")]
++[assembly: AssemblyCulture("")]
++
++// Setting ComVisible to false makes the types in this assembly not visible 
++// to COM components.  If you need to access a type in this assembly from 
++// COM, set the ComVisible attribute to true on that type.
++[assembly: ComVisible(false)]
++
++// The following GUID is for the ID of the typelib if this project is exposed to COM
++[assembly: Guid("e171bd04-40e7-4d83-bfa6-e581a9df8a29")]
++
++// Version information for an assembly consists of the following four values:
++//
++//      Major Version
++//      Minor Version 
++//      Build Number
++//      Revision
++//
++// You can specify all the values or you can default the Build and Revision Numbers 
++// by using the '*' as shown below:
++// [assembly: AssemblyVersion("1.0.*")]
++[assembly: AssemblyVersion("1.0.0.0")]
++[assembly: AssemblyFileVersion("1.0.0.0")]
+View  96  TesteImposto/TesteUnitario/TesteUnitario.csproj
+@@ -0,0 +1,96 @@
++<?xml version="1.0" encoding="utf-8"?>
++<Project ToolsVersion="12.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
++  <PropertyGroup>
++    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
++    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
++    <ProjectGuid>{4C8DF2CA-A4CA-44C3-BE1F-6D5B8A33226D}</ProjectGuid>
++    <OutputType>Library</OutputType>
++    <AppDesignerFolder>Properties</AppDesignerFolder>
++    <RootNamespace>TesteUnitario</RootNamespace>
++    <AssemblyName>TesteUnitario</AssemblyName>
++    <TargetFrameworkVersion>v4.5</TargetFrameworkVersion>
++    <FileAlignment>512</FileAlignment>
++    <ProjectTypeGuids>{3AC096D0-A1C2-E12C-1390-A8335801FDAB};{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}</ProjectTypeGuids>
++    <VisualStudioVersion Condition="'$(VisualStudioVersion)' == ''">10.0</VisualStudioVersion>
++    <VSToolsPath Condition="'$(VSToolsPath)' == ''">$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v$(VisualStudioVersion)</VSToolsPath>
++    <ReferencePath>$(ProgramFiles)\Common Files\microsoft shared\VSTT\$(VisualStudioVersion)\UITestExtensionPackages</ReferencePath>
++    <IsCodedUITest>False</IsCodedUITest>
++    <TestProjectType>UnitTest</TestProjectType>
++  </PropertyGroup>
++  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
++    <DebugSymbols>true</DebugSymbols>
++    <DebugType>full</DebugType>
++    <Optimize>false</Optimize>
++    <OutputPath>bin\Debug\</OutputPath>
++    <DefineConstants>DEBUG;TRACE</DefineConstants>
++    <ErrorReport>prompt</ErrorReport>
++    <WarningLevel>4</WarningLevel>
++  </PropertyGroup>
++  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
++    <DebugType>pdbonly</DebugType>
++    <Optimize>true</Optimize>
++    <OutputPath>bin\Release\</OutputPath>
++    <DefineConstants>TRACE</DefineConstants>
++    <ErrorReport>prompt</ErrorReport>
++    <WarningLevel>4</WarningLevel>
++  </PropertyGroup>
++  <ItemGroup>
++    <Reference Include="System" />
++    <Reference Include="System.Data" />
++    <Reference Include="System.Drawing" />
++    <Reference Include="System.Windows.Forms" />
++    <Reference Include="System.Xml" />
++  </ItemGroup>
++  <Choose>
++    <When Condition="('$(VisualStudioVersion)' == '10.0' or '$(VisualStudioVersion)' == '') and '$(TargetFrameworkVersion)' == 'v3.5'">
++      <ItemGroup>
++        <Reference Include="Microsoft.VisualStudio.QualityTools.UnitTestFramework, Version=10.1.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a, processorArchitecture=MSIL" />
++      </ItemGroup>
++    </When>
++    <Otherwise>
++      <ItemGroup>
++        <Reference Include="Microsoft.VisualStudio.QualityTools.UnitTestFramework" />
++      </ItemGroup>
++    </Otherwise>
++  </Choose>
++  <ItemGroup>
++    <Compile Include="UnitTest1.cs" />
++    <Compile Include="Properties\AssemblyInfo.cs" />
++  </ItemGroup>
++  <ItemGroup>
++    <ProjectReference Include="..\Imposto.Core\Imposto.Core.csproj">
++      <Project>{2339c0b3-1e95-4cd3-bfba-64b377857016}</Project>
++      <Name>Imposto.Core</Name>
++    </ProjectReference>
++  </ItemGroup>
++  <ItemGroup>
++    <None Include="App.config" />
++  </ItemGroup>
++  <Choose>
++    <When Condition="'$(VisualStudioVersion)' == '10.0' And '$(IsCodedUITest)' == 'True'">
++      <ItemGroup>
++        <Reference Include="Microsoft.VisualStudio.QualityTools.CodedUITestFramework, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a, processorArchitecture=MSIL">
++          <Private>False</Private>
++        </Reference>
++        <Reference Include="Microsoft.VisualStudio.TestTools.UITest.Common, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a, processorArchitecture=MSIL">
++          <Private>False</Private>
++        </Reference>
++        <Reference Include="Microsoft.VisualStudio.TestTools.UITest.Extension, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a, processorArchitecture=MSIL">
++          <Private>False</Private>
++        </Reference>
++        <Reference Include="Microsoft.VisualStudio.TestTools.UITesting, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a, processorArchitecture=MSIL">
++          <Private>False</Private>
++        </Reference>
++      </ItemGroup>
++    </When>
++  </Choose>
++  <Import Project="$(VSToolsPath)\TeamTest\Microsoft.TestTools.targets" Condition="Exists('$(VSToolsPath)\TeamTest\Microsoft.TestTools.targets')" />
++  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
++  <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 
++       Other similar extension points exist, see Microsoft.Common.targets.
++  <Target Name="BeforeBuild">
++  </Target>
++  <Target Name="AfterBuild">
++  </Target>
++  -->
++</Project> 
+View  72  TesteImposto/TesteUnitario/UnitTest1.cs
+@@ -0,0 +1,72 @@
++using System;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using Imposto.Core.Domain;
++using System.Collections.Generic;
++using Imposto.Core.Service;
++
++namespace TesteUnitario
++{
++    [TestClass]
++    public class UnitTest1
++    {
++        [TestMethod]
++        public void Test_Icms()
++        {
++            double valorProduto = 1000.00;
++            string ufOrigem = "SP";
++            string ufDestino = "RJ";
++            string cfop = "6.000";
++
++            Icms icms = new Icms();
++            icms.CalcularIcms(valorProduto, ufOrigem, ufDestino, cfop);            
++        }
++
++        [TestMethod]
++        public void Test_Ipi()
++        {
++            double valorProduto = 500; 
++            Ipi ipi = new Ipi();
++            ipi.CalcularIpi(valorProduto);
++        }
++
++        [TestMethod]
++        public void Test_Cfop()
++        {
++            string ufOrigem = "SP";
++            string ufDestino = "RO";
++            
++            Cfop cfop = new Cfop();
++            string sCfop = cfop.ObterCfopPorRota(ufOrigem, ufDestino);
++        }
++
++        [TestMethod]
++        public void Test_GeraItemNotaFiscal()
++        {
++            NotaFiscal nf = new NotaFiscal();
++            nf.EstadoDestino = "SP";
++            PedidoItem pedidoItem = new PedidoItem();
++            pedidoItem.ValorItemPedido = 1000;
++            pedidoItem.Brinde = true;
++            NotaFiscalItem nfItem = nf.GerarItemNotaFiscal(pedidoItem);
++        }
++
++        [TestMethod]
++        public void Test_GravarNotaFiscal()
++        {
++            Pedido pedido = new Pedido();
++            pedido.NomeCliente = "FABIO VIEIRA";
++            pedido.EstadoOrigem = "SP";
++            pedido.EstadoDestino = "MG";
++            pedido.ItensDoPedido = new List<PedidoItem>
++                {
++                    new PedidoItem { NomeProduto = "BERMUDA",
++                                     CodigoProduto = "BM3490",
++                                     ValorItemPedido = 70.00,
++                                     Brinde = false
++                                   }
++                };
++            NotaFiscalService nfService = new NotaFiscalService();
++            string msgErro = nfService.GerarNotaFiscal(pedido);
++        }
++    }
++}
